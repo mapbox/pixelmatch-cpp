@@ -126,7 +126,7 @@ uint64_t pixelmatch(const uint8_t* img1,
                     std::size_t height,
                     uint8_t* output = nullptr,
                     double threshold = 0.1,
-                    bool includeAA = true)
+                    bool includeAA = false)
 {
     using namespace detail;
 
