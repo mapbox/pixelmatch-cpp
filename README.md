@@ -6,7 +6,7 @@ A C++ port of [pixelmatch](https://github.com/mapbox/pixelmatch), the smallest, 
 
 ## API
 
-```
+```cpp
 namespace mapbox {
 
 uint64_t pixelmatch(const uint8_t* img1,
