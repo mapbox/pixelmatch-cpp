@@ -7,6 +7,8 @@ A C++ port of [pixelmatch](https://github.com/mapbox/pixelmatch), the smallest, 
 ## API
 
 ```
+namespace mapbox {
+
 uint64_t pixelmatch(const uint8_t* img1,
                     const uint8_t* img2,
                     std::size_t width,
@@ -14,6 +16,8 @@ uint64_t pixelmatch(const uint8_t* img1,
                     uint8_t* output = nullptr,
                     double threshold = 0.1,
                     bool includeAA = false);
+
+}
 ```
 
 `img1` and `img2` must point to buffers of size `width * height * 4`. The return value is the number of mismatched pixels.
