@@ -1,4 +1,4 @@
-#include <pixelmatch.hpp>
+#include <mapbox/pixelmatch.hpp>
 
 #include <vector>
 #include <cassert>
