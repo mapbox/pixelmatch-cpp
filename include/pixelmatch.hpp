@@ -72,7 +72,7 @@ bool antialiased(const uint8_t* img, std::size_t x1, std::size_t y1, std::size_t
     uint64_t negatives = 0;
     double min = 0;
     double max = 0;
-    std::size_t minX, minY, maxX, maxY;
+    std::size_t minX = 0, minY = 0, maxX = 0, maxY = 0;
 
     // go through 8 adjacent pixels
     for (std::size_t x = x0; x <= x2; x++) {
