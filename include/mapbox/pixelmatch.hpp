@@ -121,7 +121,9 @@ bool antialiased(const uint8_t* img, std::size_t x1, std::size_t y1, std::size_t
 }
 
 uint64_t pixelmatch(const uint8_t* img1,
+                    std::size_t stride1,
                     const uint8_t* img2,
+                    std::size_t stride2,
                     std::size_t width,
                     std::size_t height,
                     uint8_t* output = nullptr,
@@ -139,10 +141,15 @@ uint64_t pixelmatch(const uint8_t* img1,
     for (std::size_t y = 0; y < height; y++) {
         for (std::size_t x = 0; x < width; x++) {
 
-            std::size_t pos = (y * width + x) * 4;
+            // allow input images to include different padding in their strides
+            std::size_t pos1 = y * stride1 + x * 4;
+            std::size_t pos2 = y * stride2 + x * 4;
+
+            // but write the output as tightly-packed
+            std::size_t posOut = (y * width + x) * 4;
 
             // squared YUV distance between colors at this pixel position
-            double delta = detail::colorDelta(img1, img2, pos, pos);
+            double delta = detail::colorDelta(img1, img2, pos1, pos2);
 
             // the color difference is above the threshold
             if (delta > maxDelta) {
@@ -150,24 +157,35 @@ uint64_t pixelmatch(const uint8_t* img1,
                 if (!includeAA && (antialiased(img1, x, y, width, height, img2) ||
                                    antialiased(img2, x, y, width, height, img1))) {
                     // one of the pixels is anti-aliasing; draw as yellow and do not count as difference
-                    if (output) drawPixel(output, pos, 255, 255, 0);
+                    if (output) drawPixel(output, posOut, 255, 255, 0);
 
                 } else {
                     // found substantial difference not caused by anti-aliasing; draw it as red
-                    if (output) drawPixel(output, pos, 255, 0, 0);
+                    if (output) drawPixel(output, posOut, 255, 0, 0);
                     diff++;
                 }
 
             } else if (output) {
                 // pixels are similar; draw background as grayscale image blended with white
-                uint8_t val = blend(grayPixel(img1, pos), 0.1);
-                drawPixel(output, pos, val, val, val);
+                uint8_t val = blend(grayPixel(img1, posOut), 0.1);
+                drawPixel(output, posOut, val, val, val);
             }
         }
     }
 
     // return the number of different pixels
     return diff;
+}
+
+uint64_t pixelmatch(const uint8_t* img1,
+                    const uint8_t* img2,
+                    std::size_t width,
+                    std::size_t height,
+                    uint8_t* output = nullptr,
+                    double threshold = 0.1,
+                    bool includeAA = false)
+{
+    return pixelmatch(img1, width * 4, img2, width * 4, width, height, output, threshold, includeAA);
 }
 
 }
