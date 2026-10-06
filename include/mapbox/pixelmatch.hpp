@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -94,15 +95,37 @@ inline int oklabHyabDelta(double dLr, double dl, double dm, double ds, double ma
     return dLr > 0 ? -1 : 1;
 }
 
-inline int colorDeltaOpaque(int r1, int g1, int b1, int r2, int g2, int b2, double maxDelta) {
-    const OklabTables& t = oklab;
-    double l1 = cbrtLUT(t.lR[r1] + t.lG[g1] + t.lB[b1]);
-    double m1 = cbrtLUT(t.mR[r1] + t.mG[g1] + t.mB[b1]);
-    double s1 = cbrtLUT(t.sR[r1] + t.sG[g1] + t.sB[b1]);
-    double l2 = cbrtLUT(t.lR[r2] + t.lG[g2] + t.lB[b2]);
-    double m2 = cbrtLUT(t.mR[r2] + t.mG[g2] + t.mB[b2]);
-    double s2 = cbrtLUT(t.sR[r2] + t.sG[g2] + t.sB[b2]);
-    return oklabHyabDelta(lightness(l1, m1, s1) - lightness(l2, m2, s2), l1 - l2, m1 - m2, s1 - s2, maxDelta);
+// Direct-mapped cache of opaque RGB -> cube-rooted LMS and Lr; images tend to reuse a small set of colors,
+// so most lookups skip the table math. Keys are stored as RGB + 1 so that the zeroed initial state is empty.
+struct OklabCache {
+    static constexpr int BITS = 12;
+    struct Entry {
+        double l, m, s, lr;
+    };
+    uint32_t keys[1 << BITS] = {};
+    Entry values[1 << BITS];
+
+    static Entry compute(int r, int g, int b) {
+        const OklabTables& t = oklab;
+        double l = cbrtLUT(t.lR[r] + t.lG[g] + t.lB[b]);
+        double m = cbrtLUT(t.mR[r] + t.mG[g] + t.mB[b]);
+        double s = cbrtLUT(t.sR[r] + t.sG[g] + t.sB[b]);
+        return {l, m, s, lightness(l, m, s)};
+    }
+
+    Entry get(int r, int g, int b) {
+        uint32_t rgb = static_cast<uint32_t>((r << 16) | (g << 8) | b);
+        uint32_t slot = rgb * 0x9e3779b1u >> (32 - BITS);
+        if (keys[slot] == rgb + 1) return values[slot];
+        keys[slot] = rgb + 1;
+        return values[slot] = compute(r, g, b);
+    }
+};
+
+inline int colorDeltaOpaque(OklabCache& cache, int r1, int g1, int b1, int r2, int g2, int b2, double maxDelta) {
+    OklabCache::Entry c1 = cache.get(r1, g1, b1);
+    OklabCache::Entry c2 = cache.get(r2, g2, b2);
+    return oklabHyabDelta(c1.lr - c2.lr, c1.l - c2.l, c1.m - c2.m, c1.s - c2.s, maxDelta);
 }
 
 inline int colorDeltaTransparent(int r1,
@@ -147,10 +170,11 @@ inline int colorDeltaTransparent(int r1,
 // by Abasi et al. 2019) between two differing pixels exceeds maxDelta: 0 if not, ±1 if it does.
 // Semi-transparent pixels are blended against a per-pixel checkerboard or white; `index` is the
 // pixel index (not the byte offset), so strided inputs pick the same background.
-inline int colorDelta(const uint8_t* p1, const uint8_t* p2, std::size_t index, bool checkerboard, double maxDelta) {
+inline int colorDelta(
+    OklabCache& cache, const uint8_t* p1, const uint8_t* p2, std::size_t index, bool checkerboard, double maxDelta) {
     int r1 = p1[0], g1 = p1[1], b1 = p1[2], a1 = p1[3];
     int r2 = p2[0], g2 = p2[1], b2 = p2[2], a2 = p2[3];
-    if (a1 == 255 && a2 == 255) return colorDeltaOpaque(r1, g1, b1, r2, g2, b2, maxDelta);
+    if (a1 == 255 && a2 == 255) return colorDeltaOpaque(cache, r1, g1, b1, r2, g2, b2, maxDelta);
     return colorDeltaTransparent(r1, g1, b1, a1, r2, g2, b2, a2, index, checkerboard, maxDelta);
 }
 
@@ -366,6 +390,9 @@ inline uint64_t pixelmatch(const uint8_t* img1,
 
     uint64_t diff = 0;
 
+    // per call rather than shared, so concurrent calls don't race; too big for the stack
+    std::unique_ptr<OklabCache> cache(new OklabCache);
+
     // per-pixel diff mask, only allocated in windowed mode: 0 same/ignored, 1 diff, 2 excluded AA;
     // diff pixels are odd so the window scan can count them with `& 1`
     std::vector<uint8_t> mask(windowSize ? width * height : 0);
@@ -386,7 +413,7 @@ inline uint64_t pixelmatch(const uint8_t* img1,
             // if the raw RGBA bytes match
             int delta = std::memcmp(img1 + pos1, img2 + pos2, 4) == 0 || (ignoreMask && ignoreMask[index])
                             ? 0
-                            : colorDelta(img1 + pos1, img2 + pos2, index, checkerboard, threshold);
+                            : colorDelta(*cache, img1 + pos1, img2 + pos2, index, checkerboard, threshold);
 
             if (delta) {
                 // check if it's a real rendering difference or just anti-aliasing
