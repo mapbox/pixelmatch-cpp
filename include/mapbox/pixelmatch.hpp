@@ -27,15 +27,12 @@ inline float rgb2q(float r, float g, float b) {
 // Squared YIQ distance between two pixels; semi-transparent pixels are blended against white.
 // Based on "Measuring perceived color difference using YIQ NTSC transmission color space
 // in mobile applications" by Y. Kotsarenko and F. Ramos.
-inline float colorDelta(const uint8_t* img1, const uint8_t* img2, std::size_t k, std::size_t m, bool yOnly = false) {
+inline float colorDelta(const uint8_t* img1, const uint8_t* img2, std::size_t k, std::size_t m) {
     int r1 = img1[k], g1 = img1[k + 1], b1 = img1[k + 2], a1 = img1[k + 3];
     int r2 = img2[m], g2 = img2[m + 1], b2 = img2[m + 2], a2 = img2[m + 3];
 
-    int dri = r1 - r2, dgi = g1 - g2, dbi = b1 - b2, da = a1 - a2;
-
-    if (yOnly && !dri && !dgi && !dbi && !da) return 0;
-
-    float dr = dri, dg = dgi, db = dbi;
+    int da = a1 - a2;
+    float dr = r1 - r2, dg = g1 - g2, db = b1 - b2;
     if (a1 < 255 || a2 < 255) { // blend with white background
         dr = (r1 * a1 - r2 * a2 - 255 * da) / 255.0f;
         dg = (g1 * a1 - g2 * a2 - 255 * da) / 255.0f;
@@ -43,10 +40,35 @@ inline float colorDelta(const uint8_t* img1, const uint8_t* img2, std::size_t k,
     }
 
     float y = rgb2y(dr, dg, db);
-    if (yOnly) return y;
     float i = rgb2i(dr, dg, db);
     float q = rgb2q(dr, dg, db);
     return 0.5053f * y * y + 0.299f * i * i + 0.1957f * q * q;
+}
+
+// Brightness-only delta for the anti-aliasing detector, with the center pixel's RGBA hoisted out of
+// the neighbor loop. Semi-transparent pixels are blended against white; when the blended luma delta
+// cancels out exactly but alpha differs, the alpha delta gives the ramp direction, so only pixels
+// equal in both blended luma and alpha count as equal siblings.
+inline float brightnessDelta(const uint8_t* img, std::size_t m, int r1, int g1, int b1, int a1) {
+    int r2 = img[m], g2 = img[m + 1], b2 = img[m + 2], a2 = img[m + 3];
+    int dri = r1 - r2, dgi = g1 - g2, dbi = b1 - b2, da = a1 - a2;
+
+    if (!dri && !dgi && !dbi && !da) return 0;
+
+    if (a1 < 255 || a2 < 255) { // blend with white background
+        float dr = (r1 * a1 - r2 * a2 - 255 * da) / 255.0f;
+        float dg = (g1 * a1 - g2 * a2 - 255 * da) / 255.0f;
+        float db = (b1 * a1 - b2 * a2 - 255 * da) / 255.0f;
+        float d = rgb2y(dr, dg, db);
+        return d == 0 && da ? da / 2.0f : d;
+    }
+    return rgb2y(dri, dgi, dbi);
+}
+
+inline uint32_t load32(const uint8_t* p) {
+    uint32_t v;
+    std::memcpy(&v, p, 4);
+    return v;
 }
 
 inline void drawPixel(uint8_t* output, std::size_t pos, Color c) {
@@ -66,19 +88,29 @@ inline void drawGrayPixel(const uint8_t* img, std::size_t i, uint8_t* output, st
 // Check if a pixel has 3+ adjacent pixels of the same RGBA value.
 inline bool hasManySiblings(
     const uint8_t* img, std::size_t stride, std::size_t x1, std::size_t y1, std::size_t width, std::size_t height) {
+    const uint8_t* p = img + y1 * stride + x1 * 4;
+    uint32_t val = load32(p);
+
+    if (x1 > 0 && x1 < width - 1 && y1 > 0 && y1 < height - 1) {
+        const uint8_t* above = p - stride;
+        const uint8_t* below = p + stride;
+        int same = (val == load32(above - 4)) + (val == load32(above)) + (val == load32(above + 4)) +
+                   (val == load32(p - 4)) + (val == load32(p + 4)) + (val == load32(below - 4)) +
+                   (val == load32(below)) + (val == load32(below + 4));
+        return same > 2;
+    }
+
     std::size_t x0 = x1 > 0 ? x1 - 1 : 0;
     std::size_t y0 = y1 > 0 ? y1 - 1 : 0;
     std::size_t x2 = std::min(x1 + 1, width - 1);
     std::size_t y2 = std::min(y1 + 1, height - 1);
-    std::size_t pos = y1 * stride + x1 * 4;
     int zeroes = (x1 == x0 || x1 == x2 || y1 == y0 || y1 == y2) ? 1 : 0;
 
     for (std::size_t x = x0; x <= x2; x++) {
         for (std::size_t y = y0; y <= y2; y++) {
             if (x == x1 && y == y1) continue;
-            if (std::memcmp(img + pos, img + y * stride + x * 4, 4) == 0) {
-                if (++zeroes > 2) return true;
-            }
+            zeroes += val == load32(img + y * stride + x * 4);
+            if (zeroes > 2) return true;
         }
     }
     return false;
@@ -102,6 +134,7 @@ inline bool antialiased(const uint8_t* img,
     std::size_t y2 = std::min(y1 + 1, height - 1);
     std::size_t pos = y1 * stride + x1 * 4;
     int zeroes = (x1 == x0 || x1 == x2 || y1 == y0 || y1 == y2) ? 1 : 0;
+    int cr = img[pos], cg = img[pos + 1], cb = img[pos + 2], ca = img[pos + 3];
     float minD = 0, maxD = 0;
     std::size_t minX = 0, minY = 0, maxX = 0, maxY = 0;
 
@@ -111,7 +144,7 @@ inline bool antialiased(const uint8_t* img,
             if (x == x1 && y == y1) continue;
 
             // brightness delta between the center pixel and the adjacent one
-            float delta = colorDelta(img, img, pos, y * stride + x * 4, true);
+            float delta = brightnessDelta(img, y * stride + x * 4, cr, cg, cb, ca);
 
             // count the number of equal, darker and brighter adjacent pixels
             if (delta == 0) {
