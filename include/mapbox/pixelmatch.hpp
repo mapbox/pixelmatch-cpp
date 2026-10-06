@@ -8,6 +8,10 @@
 
 namespace mapbox {
 
+struct Color {
+    uint8_t r, g, b;
+};
+
 namespace detail {
 
 inline float rgb2y(float r, float g, float b) {
@@ -45,18 +49,18 @@ inline float colorDelta(const uint8_t* img1, const uint8_t* img2, std::size_t k,
     return 0.5053f * y * y + 0.299f * i * i + 0.1957f * q * q;
 }
 
-inline void drawPixel(uint8_t* output, std::size_t pos, uint8_t r, uint8_t g, uint8_t b) {
-    output[pos] = r;
-    output[pos + 1] = g;
-    output[pos + 2] = b;
+inline void drawPixel(uint8_t* output, std::size_t pos, Color c) {
+    output[pos] = c.r;
+    output[pos + 1] = c.g;
+    output[pos + 2] = c.b;
     output[pos + 3] = 255;
 }
 
-inline void drawGrayPixel(const uint8_t* img, std::size_t i, uint8_t* output, std::size_t outPos) {
+inline void drawGrayPixel(const uint8_t* img, std::size_t i, uint8_t* output, std::size_t outPos, float alpha) {
     int r = img[i], g = img[i + 1], b = img[i + 2], a = img[i + 3];
     float y = rgb2y(r, g, b);
-    uint8_t v = static_cast<uint8_t>(255 + (y - 255) * 0.1f * a / 255);
-    drawPixel(output, outPos, v, v, v);
+    uint8_t v = static_cast<uint8_t>(255 + (y - 255) * alpha * a / 255);
+    drawPixel(output, outPos, {v, v, v});
 }
 
 // Check if a pixel has 3+ adjacent pixels of the same RGBA value.
@@ -147,6 +151,14 @@ struct Options {
     float threshold = 0.1f;
     // whether to count anti-aliased pixels as differences instead of detecting and ignoring them
     bool includeAA = false;
+    // opacity of the original image in the diff output
+    float alpha = 0.1f;
+    // color of anti-aliased pixels in the diff output
+    Color aaColor = {255, 255, 0};
+    // color of differing pixels in the diff output
+    Color diffColor = {255, 0, 0};
+    // draw the diff over a transparent background (a mask) instead of the original image
+    bool diffMask = false;
 };
 
 inline uint64_t pixelmatch(const uint8_t* img1,
@@ -170,10 +182,10 @@ inline uint64_t pixelmatch(const uint8_t* img1,
         }
     }
     if (identical) {
-        if (output) {
+        if (output && !options.diffMask) {
             for (std::size_t y = 0; y < height; y++) {
                 for (std::size_t x = 0; x < width; x++) {
-                    drawGrayPixel(img1, y * stride1 + x * 4, output, (y * width + x) * 4);
+                    drawGrayPixel(img1, y * stride1 + x * 4, output, (y * width + x) * 4, options.alpha);
                 }
             }
         }
@@ -203,17 +215,17 @@ inline uint64_t pixelmatch(const uint8_t* img1,
                 if (!includeAA && (antialiased(img1, stride1, x, y, width, height, img1, stride1, img2, stride2) ||
                                    antialiased(img2, stride2, x, y, width, height, img1, stride1, img2, stride2))) {
                     // one of the pixels is anti-aliasing; draw as yellow and do not count as a difference
-                    if (output) drawPixel(output, posOut, 255, 255, 0);
+                    if (output && !options.diffMask) drawPixel(output, posOut, options.aaColor);
 
                 } else {
                     // found substantial difference not caused by anti-aliasing; draw it as red
-                    if (output) drawPixel(output, posOut, 255, 0, 0);
+                    if (output) drawPixel(output, posOut, options.diffColor);
                     diff++;
                 }
 
-            } else if (output) {
+            } else if (output && !options.diffMask) {
                 // pixels are similar; draw background as grayscale image blended with white
-                drawGrayPixel(img1, pos1, output, posOut);
+                drawGrayPixel(img1, pos1, output, posOut, options.alpha);
             }
         }
     }

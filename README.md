@@ -21,9 +21,17 @@ To generate an Xcode project: `cmake -B build -G Xcode && open build/pixelmatch.
 ```cpp
 namespace mapbox {
 
+struct Color {
+    uint8_t r, g, b;
+};
+
 struct Options {
     float threshold = 0.1f;
     bool includeAA = false;
+    float alpha = 0.1f;
+    Color aaColor = {255, 255, 0};
+    Color diffColor = {255, 0, 0};
+    bool diffMask = false;
 };
 
 uint64_t pixelmatch(
@@ -48,3 +56,7 @@ Options:
 
 - `threshold` — Matching threshold, ranges from `0` to `1`. Smaller values make the comparison more sensitive.
 - `includeAA` — If `true`, disables detecting and ignoring anti-aliased pixels.
+- `alpha` — Blending factor of unchanged pixels in the diff output. Ranges from `0` for pure white to `1` for original brightness.
+- `aaColor` — The color of anti-aliased pixels in the diff output.
+- `diffColor` — The color of differing pixels in the diff output.
+- `diffMask` — Draw the diff over a transparent background (a mask), rather than over the original image. Only differing pixels are written to `output`; anti-aliased pixels aren't drawn.
