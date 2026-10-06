@@ -306,6 +306,9 @@ struct Options {
     bool diffMask = false;
     // blend semi-transparent pixels against a checkerboard pattern (true) or plain white (false)
     bool checkerboard = true;
+    // one byte per pixel (width * height, tightly packed regardless of image strides); pixels with a
+    // non-zero value are skipped from comparison
+    const uint8_t* ignoreMask = nullptr;
 };
 
 inline uint64_t pixelmatch(const uint8_t* img1,
@@ -326,14 +329,24 @@ inline uint64_t pixelmatch(const uint8_t* img1,
     const Color diffColorAlt = options.diffColorAlt.value_or(diffColor);
     const bool diffMask = options.diffMask;
     const bool checkerboard = options.checkerboard;
+    const uint8_t* ignoreMask = options.ignoreMask;
 
     // fast path for identical images
     bool identical = true;
     for (std::size_t y = 0; y < height; y++) {
-        if (std::memcmp(img1 + y * stride1, img2 + y * stride2, width * 4) != 0) {
+        const uint8_t* row1 = img1 + y * stride1;
+        const uint8_t* row2 = img2 + y * stride2;
+        if (std::memcmp(row1, row2, width * 4) == 0) continue;
+        if (!ignoreMask) {
             identical = false;
             break;
         }
+        // the row differs, but maybe only in ignored pixels
+        const uint8_t* maskRow = ignoreMask + y * width;
+        for (std::size_t x = 0; x < width && identical; x++) {
+            if (!maskRow[x] && std::memcmp(row1 + x * 4, row2 + x * 4, 4) != 0) identical = false;
+        }
+        if (!identical) break;
     }
     if (identical) {
         if (output && !diffMask) {
@@ -359,7 +372,7 @@ inline uint64_t pixelmatch(const uint8_t* img1,
 
             // whether the color difference exceeds the threshold (0 or ±1); skip the math entirely
             // if the raw RGBA bytes match
-            int delta = std::memcmp(img1 + pos1, img2 + pos2, 4) == 0
+            int delta = std::memcmp(img1 + pos1, img2 + pos2, 4) == 0 || (ignoreMask && ignoreMask[index])
                             ? 0
                             : colorDelta(img1 + pos1, img2 + pos2, index, checkerboard, threshold);
 

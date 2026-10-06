@@ -21,7 +21,8 @@ static void diffTest(const char* imgPath1,
                      const char* imgPath2,
                      const char* diffPath,
                      const mapbox::Options& options,
-                     uint64_t expectedMismatch) {
+                     uint64_t expectedMismatch,
+                     bool ignoreFirstHalf = false) {
     std::cout << "comparing " << imgPath1 << " to " << imgPath2 << ", " << diffPath << "\n";
 
     unsigned long w1, h1, w2, h2;
@@ -29,9 +30,17 @@ static void diffTest(const char* imgPath1,
     auto img2 = readPNG(imgPath2, w2, h2);
     CHECK(w1 == w2 && h1 == h2);
 
+    // same mask pattern as the JS tests
+    mapbox::Options opts = options;
+    std::vector<uint8_t> ignoreMask(w1 * h1);
+    if (ignoreFirstHalf) {
+        for (std::size_t i = 0; i < ignoreMask.size(); i++) ignoreMask[i] = i <= ignoreMask.size() / 2;
+        opts.ignoreMask = ignoreMask.data();
+    }
+
     std::vector<unsigned char> actualDiff(w1 * h1 * 4);
-    uint64_t mismatch = mapbox::pixelmatch(img1.data(), img2.data(), w1, h1, actualDiff.data(), options);
-    uint64_t mismatch2 = mapbox::pixelmatch(img1.data(), img2.data(), w1, h1, nullptr, options);
+    uint64_t mismatch = mapbox::pixelmatch(img1.data(), img2.data(), w1, h1, actualDiff.data(), opts);
+    uint64_t mismatch2 = mapbox::pixelmatch(img1.data(), img2.data(), w1, h1, nullptr, opts);
 
     if (mismatch != expectedMismatch) {
         std::cerr << "  mismatch: got " << mismatch << ", expected " << expectedMismatch << "\n";
@@ -85,6 +94,11 @@ int main() {
     diffTest("7a", "7b", "7diff", alt, 2440);
 
     diffTest("8a", "5b", "8diff", options, 32896);
+
+    // diff for the parts outside the mask
+    diffTest("9a", "9b", "9diff", options, 12422, true);
+    // identical fast path with a diff only within the mask
+    diffTest("10a", "10b", "10diff", options, 0, true);
 
     return failures > 0 ? 1 : 0;
 }
