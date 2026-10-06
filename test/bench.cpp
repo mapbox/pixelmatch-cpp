@@ -7,21 +7,16 @@
 
 #include "png_decode.hpp"
 
-struct Case {
-    const char* a;
-    const char* b;
-    double threshold;
-};
-
 int main() {
-    static const Case cases[] = {
-        {"1a", "1b", 0.05},
-        {"2a", "2b", 0.05},
-        {"3a", "3b", 0.05},
-        {"4a", "4b", 0.05},
-        {"5a", "5b", 0.05},
-        {"6a", "6b", 0.05},
-        {"7a", "7b", 0.1},
+    // mirrors the JS bench: default options, no diff output
+    static const char* cases[][2] = {
+        {"1a", "1b"},
+        {"2a", "2b"},
+        {"3a", "3b"},
+        {"4a", "4b"},
+        {"5a", "5b"},
+        {"6a", "6b"},
+        {"7a", "7b"},
     };
 
     using clock = std::chrono::steady_clock;
@@ -30,22 +25,21 @@ int main() {
 
     for (const auto& c : cases) {
         unsigned long w, h;
-        auto img1 = readPNG(c.a, w, h);
-        auto img2 = readPNG(c.b, w, h);
-        std::vector<unsigned char> output(w * h * 4);
+        auto img1 = readPNG(c[0], w, h);
+        auto img2 = readPNG(c[1], w, h);
 
         // calibrate iterations so each case takes ~100ms
         int iters = 1;
         for (;;) {
             auto t0 = clock::now();
             for (int i = 0; i < iters; i++) {
-                mapbox::pixelmatch(img1.data(), img2.data(), w, h, output.data(), c.threshold);
+                mapbox::pixelmatch(img1.data(), img2.data(), w, h);
             }
             double ms = std::chrono::duration<double, std::milli>(clock::now() - t0).count();
             if (ms >= 100.0 || iters >= 1 << 20) {
                 double per = ms / iters;
                 totalMs += per;
-                std::cout << c.a << " vs " << c.b << " (" << w << "x" << h << "): " << per << " ms/run (" << iters
+                std::cout << c[0] << " vs " << c[1] << " (" << w << "x" << h << "): " << per << " ms/run (" << iters
                           << " iters)\n";
                 break;
             }
