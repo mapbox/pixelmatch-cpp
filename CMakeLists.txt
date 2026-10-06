@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.15)
 
 project(pixelmatch
-    VERSION 1.0.0
+    VERSION 8.0.0
     DESCRIPTION "C++ port of pixelmatch, a pixel-level image comparison library"
     LANGUAGES CXX
 )
@@ -30,7 +30,7 @@ if(PROJECT_IS_TOP_LEVEL)
 
     add_executable(bench_pixelmatch test/bench.cpp)
     target_link_libraries(bench_pixelmatch PRIVATE pixelmatch PNG::PNG)
-    target_compile_options(bench_pixelmatch PRIVATE -Wall -Wextra)
+    target_compile_options(bench_pixelmatch PRIVATE -Wall -Wextra -Wshadow)
 endif()
 
 include(GNUInstallDirs)

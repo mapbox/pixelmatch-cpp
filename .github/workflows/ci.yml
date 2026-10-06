@@ -13,7 +13,15 @@ jobs:
       - name: Install libpng
         run: sudo apt-get update && sudo apt-get install -y libpng-dev
       - name: Check formatting
-        run: clang-format --dry-run --Werror include/mapbox/*.hpp test/test.cpp test/bench.cpp test/png_decode.hpp
-      - run: cmake -B build -DCMAKE_BUILD_TYPE=Release
-      - run: cmake --build build
-      - run: ctest --test-dir build --output-on-failure
+        run: clang-format --dry-run --Werror include/mapbox/*.hpp test/*.cpp test/*.hpp
+      - name: Build and test (Release)
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+      - name: Build and test (ASan + UBSan)
+        run: |
+          cmake -B build-san -DCMAKE_BUILD_TYPE=Debug -DCMAKE_COMPILE_WARNING_AS_ERROR=ON \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all"
+          cmake --build build-san
+          ctest --test-dir build-san --output-on-failure
