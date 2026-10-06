@@ -57,6 +57,60 @@ static void diffTest(const char* imgPath1,
     }
 }
 
+static mapbox::Options withWindow(std::size_t windowSize, bool includeAA = true, double threshold = 0.1) {
+    mapbox::Options options;
+    options.windowSize = windowSize;
+    options.includeAA = includeAA;
+    options.threshold = threshold;
+    return options;
+}
+
+static void windowTests() {
+    std::cout << "windowSize\n";
+    {
+        const std::size_t w = 10, h = 10;
+        std::vector<uint8_t> img1(w * h * 4, 255), img2(w * h * 4, 255);
+        // dense 3×3 block of black diff pixels at (2,2)–(4,4)
+        for (std::size_t y = 2; y < 5; y++) {
+            for (std::size_t x = 2; x < 5; x++) {
+                std::size_t p = (y * w + x) * 4;
+                img2[p] = img2[p + 1] = img2[p + 2] = 0;
+            }
+        }
+        auto match = [&](const std::vector<uint8_t>& b, std::size_t n, bool includeAA = true) {
+            return mapbox::pixelmatch(img1.data(), b.data(), w, h, nullptr, withWindow(n, includeAA));
+        };
+        CHECK(match(img2, 0) == 9);
+        CHECK(match(img2, 3) == 9);
+        CHECK(match(img2, 2) == 4);
+        CHECK(match(img2, 100) == 9);
+        CHECK(match(img1, 3, false) == 0);
+    }
+    {
+        unsigned long w, h;
+        auto img1 = readPNG("6a", w, h);
+        auto img2 = readPNG("6b", w, h);
+        auto match = [&](std::size_t n) {
+            return mapbox::pixelmatch(img1.data(), img2.data(), w, h, nullptr, withWindow(n, false, 0.05));
+        };
+        CHECK(match(0) == 51);
+        CHECK(match(w) == 51);
+        CHECK(match(100000) == 51);
+        CHECK(match(32) == 29);
+        CHECK(match(8) == 6);
+    }
+    {
+        const std::size_t w = 4, h = 4;
+        std::vector<uint8_t> img1(w * h * 4, 0), img2(w * h * 4, 255);
+        auto match = [&](std::size_t n) {
+            return mapbox::pixelmatch(img1.data(), img2.data(), w, h, nullptr, withWindow(n));
+        };
+        CHECK(match(SIZE_MAX) == 16);
+        CHECK(match(2) == 4);
+        CHECK(match(1) == 1);
+    }
+}
+
 static mapbox::Options withThreshold(double threshold) {
     mapbox::Options options;
     options.threshold = threshold;
@@ -99,6 +153,8 @@ int main() {
     diffTest("9a", "9b", "9diff", options, 12422, true);
     // identical fast path with a diff only within the mask
     diffTest("10a", "10b", "10diff", options, 0, true);
+
+    windowTests();
 
     return failures > 0 ? 1 : 0;
 }

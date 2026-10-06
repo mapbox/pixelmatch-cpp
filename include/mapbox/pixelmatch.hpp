@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <vector>
 
 namespace mapbox {
 
@@ -309,6 +310,9 @@ struct Options {
     // one byte per pixel (width * height, tightly packed regardless of image strides); pixels with a
     // non-zero value are skipped from comparison
     const uint8_t* ignoreMask = nullptr;
+    // if non-zero, return the maximum number of diff pixels found in any N×N sliding window instead
+    // of the total diff count; clamped to the image size
+    std::size_t windowSize = 0;
 };
 
 inline uint64_t pixelmatch(const uint8_t* img1,
@@ -330,6 +334,7 @@ inline uint64_t pixelmatch(const uint8_t* img1,
     const bool diffMask = options.diffMask;
     const bool checkerboard = options.checkerboard;
     const uint8_t* ignoreMask = options.ignoreMask;
+    const std::size_t windowSize = options.windowSize;
 
     // fast path for identical images
     bool identical = true;
@@ -361,6 +366,13 @@ inline uint64_t pixelmatch(const uint8_t* img1,
 
     uint64_t diff = 0;
 
+    // per-pixel diff mask, only allocated in windowed mode: 0 same/ignored, 1 diff, 2 excluded AA;
+    // diff pixels are odd so the window scan can count them with `& 1`
+    std::vector<uint8_t> mask(windowSize ? width * height : 0);
+    // first/last row containing a counted diff, to bound the windowed post-pass
+    std::size_t firstDiffY = height;
+    std::size_t lastDiffY = 0;
+
     // compare each pixel of one image against the other one
     for (std::size_t y = 0; y < height; y++) {
         for (std::size_t x = 0; x < width; x++) {
@@ -382,10 +394,16 @@ inline uint64_t pixelmatch(const uint8_t* img1,
                                    antialiased(img2, stride2, x, y, width, height, img1, stride1, img2, stride2))) {
                     // one of the pixels is anti-aliasing; draw as yellow and do not count as a difference
                     if (output && !diffMask) drawPixel(output, posOut, aaColor);
+                    if (windowSize) mask[index] = 2;
 
                 } else {
                     // found substantial difference not caused by anti-aliasing; draw it as such
                     if (output) drawPixel(output, posOut, delta < 0 ? diffColorAlt : diffColor);
+                    if (windowSize) {
+                        mask[index] = 1;
+                        if (firstDiffY == height) firstDiffY = y;
+                        lastDiffY = y;
+                    }
                     diff++;
                 }
 
@@ -396,7 +414,54 @@ inline uint64_t pixelmatch(const uint8_t* img1,
         }
     }
 
-    return diff;
+    if (!windowSize || !diff) return diff;
+
+    // windowed mode: the maximum number of diff pixels over all N×N sliding windows
+    const std::size_t n = std::min({windowSize, width, height});
+
+    // colSum[x] counts diff pixels in column x over the last n rows, maintained incrementally (add
+    // the entering row, subtract the leaving one); bandTotal is their sum, an upper bound for any
+    // window in the band, so bands that can't beat maxCount skip the horizontal scan
+    std::vector<uint32_t> colSum(width);
+    uint32_t bandTotal = 0;
+    uint32_t maxCount = 0;
+
+    // colSum is zero before firstDiffY and drained after the last diff row leaves the band, so only
+    // scan the bands that can be non-zero
+    const std::size_t yEnd = std::min(height - 1, lastDiffY + n - 1);
+
+    for (std::size_t y = firstDiffY; y <= yEnd; y++) {
+        const uint8_t* entering = mask.data() + y * width;
+        if (y >= n) {
+            const uint8_t* leaving = entering - n * width;
+            for (std::size_t x = 0; x < width; x++) {
+                uint32_t e = entering[x] & 1, l = leaving[x] & 1;
+                colSum[x] += e - l;
+                bandTotal += e - l;
+            }
+        } else {
+            for (std::size_t x = 0; x < width; x++) {
+                uint32_t e = entering[x] & 1;
+                colSum[x] += e;
+                bandTotal += e;
+            }
+            // only scan windows that are fully inside vertically
+            if (y < n - 1) continue;
+        }
+
+        if (bandTotal <= maxCount) continue;
+
+        // a horizontal running sum over colSum yields every window sum in this band
+        uint32_t windowSum = 0;
+        for (std::size_t x = 0; x < n - 1; x++) windowSum += colSum[x];
+        for (std::size_t x = n - 1; x < width; x++) {
+            windowSum += colSum[x];
+            maxCount = std::max(maxCount, windowSum);
+            windowSum -= colSum[x - n + 1];
+        }
+    }
+
+    return maxCount;
 }
 
 inline uint64_t pixelmatch(const uint8_t* img1,
