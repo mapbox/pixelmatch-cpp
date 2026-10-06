@@ -20,11 +20,9 @@ static int failures = 0;
 static void diffTest(const char* imgPath1,
                      const char* imgPath2,
                      const char* diffPath,
-                     double threshold,
-                     bool includeAA,
+                     const mapbox::Options& options,
                      uint64_t expectedMismatch) {
-    std::cout << "comparing " << imgPath1 << " to " << imgPath2 << ", threshold: " << threshold
-              << ", includeAA: " << includeAA << "\n";
+    std::cout << "comparing " << imgPath1 << " to " << imgPath2 << ", " << diffPath << "\n";
 
     unsigned long w1, h1, w2, h2;
     auto img1 = readPNG(imgPath1, w1, h1);
@@ -32,52 +30,61 @@ static void diffTest(const char* imgPath1,
     CHECK(w1 == w2 && h1 == h2);
 
     std::vector<unsigned char> actualDiff(w1 * h1 * 4);
-    mapbox::Options options;
-    options.threshold = threshold;
-    options.includeAA = includeAA;
     uint64_t mismatch = mapbox::pixelmatch(img1.data(), img2.data(), w1, h1, actualDiff.data(), options);
+    uint64_t mismatch2 = mapbox::pixelmatch(img1.data(), img2.data(), w1, h1, nullptr, options);
 
     if (mismatch != expectedMismatch) {
         std::cerr << "  mismatch: got " << mismatch << ", expected " << expectedMismatch << "\n";
         failures++;
     }
+    CHECK(mismatch == mismatch2);
 
-    if (diffPath) {
-        unsigned long wd, hd;
-        auto expectedDiff = readPNG(diffPath, wd, hd);
-        CHECK(w1 == wd && h1 == hd);
-        if (actualDiff != expectedDiff) {
-            std::cerr << "  diff image differs from expected\n";
-            failures++;
-        }
+    unsigned long wd, hd;
+    auto expectedDiff = readPNG(diffPath, wd, hd);
+    CHECK(w1 == wd && h1 == hd);
+    if (actualDiff != expectedDiff) {
+        std::cerr << "  diff image differs from expected\n";
+        failures++;
     }
 }
 
-struct Case {
-    const char* img1;
-    const char* img2;
-    const char* diff; // nullptr = count-only
-    double threshold;
-    bool includeAA;
-    uint64_t expected;
-};
-
-// diff fixtures from upstream JS pixelmatch; nullptr diffs are count-only until the options they
-// need are supported
-static const Case cases[] = {
-    {"1a", "1b", "1diff", 0.05, false, 152},
-    {"2a", "2b", nullptr, 0.05, false, 12821},
-    {"3a", "3b", "3diff", 0.05, false, 220},
-    {"4a", "4b", "4diff", 0.05, false, 36563},
-    {"5a", "5b", "5diff", 0.05, false, 0},
-    {"6a", "6b", "6diff", 0.05, false, 51},
-    {"7a", "7b", nullptr, 0.1, false, 2440},
-    {"8a", "5b", "8diff", 0.05, false, 32896},
-};
+static mapbox::Options withThreshold(double threshold) {
+    mapbox::Options options;
+    options.threshold = threshold;
+    return options;
+}
 
 int main() {
-    for (const auto& c : cases) {
-        diffTest(c.img1, c.img2, c.diff, c.threshold, c.includeAA, c.expected);
-    }
+    const auto options = withThreshold(0.05);
+
+    diffTest("1a", "1b", "1diff", options, 152);
+    diffTest("1a", "1b", "1diffdefaultthreshold", {}, 121);
+
+    auto mask = withThreshold(0.05);
+    mask.diffMask = true;
+    diffTest("1a", "1b", "1diffmask", mask, 152);
+
+    auto emptyMask = withThreshold(0);
+    emptyMask.diffMask = true;
+    diffTest("1a", "1a", "1emptydiffmask", emptyMask, 0);
+
+    auto colors = withThreshold(0.05);
+    colors.alpha = 0.5;
+    colors.aaColor = {0, 192, 0};
+    colors.diffColor = {255, 0, 255};
+    diffTest("2a", "2b", "2diff", colors, 12821);
+
+    diffTest("3a", "3b", "3diff", options, 220);
+    diffTest("4a", "4b", "4diff", options, 36563);
+    diffTest("5a", "5b", "5diff", options, 0);
+    diffTest("6a", "6b", "6diff", options, 51);
+    diffTest("6a", "6a", "6empty", withThreshold(0), 0);
+
+    mapbox::Options alt;
+    alt.diffColorAlt = mapbox::Color{0, 255, 0};
+    diffTest("7a", "7b", "7diff", alt, 2440);
+
+    diffTest("8a", "5b", "8diff", options, 32896);
+
     return failures > 0 ? 1 : 0;
 }

@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 
 namespace mapbox {
 
@@ -298,6 +299,9 @@ struct Options {
     Color aaColor = {255, 255, 0};
     // color of differing pixels in the diff output
     Color diffColor = {255, 0, 0};
+    // color of differing pixels that are darker in img2 than in img1, to distinguish "added" from
+    // "removed" parts; defaults to diffColor
+    std::optional<Color> diffColorAlt;
     // draw the diff over a transparent background (a mask) instead of the original image
     bool diffMask = false;
     // blend semi-transparent pixels against a checkerboard pattern (true) or plain white (false)
@@ -319,6 +323,7 @@ inline uint64_t pixelmatch(const uint8_t* img1,
     const double alpha = options.alpha;
     const Color aaColor = options.aaColor;
     const Color diffColor = options.diffColor;
+    const Color diffColorAlt = options.diffColorAlt.value_or(diffColor);
     const bool diffMask = options.diffMask;
     const bool checkerboard = options.checkerboard;
 
@@ -366,8 +371,8 @@ inline uint64_t pixelmatch(const uint8_t* img1,
                     if (output && !diffMask) drawPixel(output, posOut, aaColor);
 
                 } else {
-                    // found substantial difference not caused by anti-aliasing; draw it as red
-                    if (output) drawPixel(output, posOut, diffColor);
+                    // found substantial difference not caused by anti-aliasing; draw it as such
+                    if (output) drawPixel(output, posOut, delta < 0 ? diffColorAlt : diffColor);
                     diff++;
                 }
 
