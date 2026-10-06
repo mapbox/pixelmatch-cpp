@@ -6,7 +6,7 @@ This is a header-only library; add `include/` to your include path, use it as a 
 
 ## Building & testing
 
-Requires CMake 3.15+ and a C++11 compiler.
+Requires CMake 3.15+ and a C++17 compiler.
 
 ```bash
 cmake -B build
@@ -21,14 +21,18 @@ To generate an Xcode project: `cmake -B build -G Xcode && open build/pixelmatch.
 ```cpp
 namespace mapbox {
 
+struct Options {
+    float threshold = 0.1f;
+    bool includeAA = false;
+};
+
 uint64_t pixelmatch(
     const uint8_t* img1,
     const uint8_t* img2,
     std::size_t width,
     std::size_t height,
     uint8_t* output = nullptr,
-    double threshold = 0.1,
-    bool includeAA = false
+    const Options& options = {}
 );
 
 }
@@ -36,8 +40,11 @@ uint64_t pixelmatch(
 
 `img1` and `img2` must point to buffers of size `width * height * 4`. The return value is the number of mismatched pixels.
 
-Optional arguments:
+If `output` is non-null, it must point to a buffer of the same size, which receives the diff.
 
-- `output` - If non-null, must point to an output buffer of the same size, which recieves the diff.
+An overload taking `stride1` and `stride2` (in bytes) after each image pointer supports inputs with padded rows; the output is always tightly packed.
+
+Options:
+
 - `threshold` — Matching threshold, ranges from `0` to `1`. Smaller values make the comparison more sensitive.
 - `includeAA` — If `true`, disables detecting and ignoring anti-aliased pixels.

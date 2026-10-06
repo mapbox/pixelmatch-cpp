@@ -142,6 +142,13 @@ inline bool antialiased(const uint8_t* img,
 
 } // namespace detail
 
+struct Options {
+    // matching threshold (0 to 1); smaller values make the comparison more sensitive
+    float threshold = 0.1f;
+    // whether to count anti-aliased pixels as differences instead of detecting and ignoring them
+    bool includeAA = false;
+};
+
 inline uint64_t pixelmatch(const uint8_t* img1,
                            std::size_t stride1,
                            const uint8_t* img2,
@@ -149,9 +156,10 @@ inline uint64_t pixelmatch(const uint8_t* img1,
                            std::size_t width,
                            std::size_t height,
                            uint8_t* output = nullptr,
-                           float threshold = 0.1f,
-                           bool includeAA = false) {
+                           const Options& options = {}) {
     using namespace detail;
+    const float threshold = options.threshold;
+    const bool includeAA = options.includeAA;
 
     // fast path for identical images
     bool identical = true;
@@ -218,9 +226,8 @@ inline uint64_t pixelmatch(const uint8_t* img1,
                            std::size_t width,
                            std::size_t height,
                            uint8_t* output = nullptr,
-                           float threshold = 0.1f,
-                           bool includeAA = false) {
-    return pixelmatch(img1, width * 4, img2, width * 4, width, height, output, threshold, includeAA);
+                           const Options& options = {}) {
+    return pixelmatch(img1, width * 4, img2, width * 4, width, height, output, options);
 }
 
 } // namespace mapbox

@@ -20,7 +20,7 @@ static int failures = 0;
 static void diffTest(const char* imgPath1,
                      const char* imgPath2,
                      const char* diffPath,
-                     double threshold,
+                     float threshold,
                      bool includeAA,
                      uint64_t expectedMismatch) {
     std::cout << "comparing " << imgPath1 << " to " << imgPath2 << ", threshold: " << threshold
@@ -32,7 +32,10 @@ static void diffTest(const char* imgPath1,
     CHECK(w1 == w2 && h1 == h2);
 
     std::vector<unsigned char> actualDiff(w1 * h1 * 4);
-    uint64_t mismatch = mapbox::pixelmatch(img1.data(), img2.data(), w1, h1, actualDiff.data(), threshold, includeAA);
+    mapbox::Options options;
+    options.threshold = threshold;
+    options.includeAA = includeAA;
+    uint64_t mismatch = mapbox::pixelmatch(img1.data(), img2.data(), w1, h1, actualDiff.data(), options);
 
     if (mismatch != expectedMismatch) {
         std::cerr << "  mismatch: got " << mismatch << ", expected " << expectedMismatch << "\n";
@@ -54,7 +57,7 @@ struct Case {
     const char* img1;
     const char* img2;
     const char* diff; // nullptr = count-only
-    double threshold;
+    float threshold;
     bool includeAA;
     uint64_t expected;
 };

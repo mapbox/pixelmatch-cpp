@@ -14,7 +14,7 @@ target_include_directories(pixelmatch INTERFACE
     $<INSTALL_INTERFACE:include>
 )
 
-target_compile_features(pixelmatch INTERFACE cxx_std_11)
+target_compile_features(pixelmatch INTERFACE cxx_std_17)
 
 if(PROJECT_IS_TOP_LEVEL)
     enable_testing()
